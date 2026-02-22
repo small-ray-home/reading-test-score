@@ -6,24 +6,41 @@
     <title>114寒假閱讀測驗成績產生器</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        @media print {
-            .no-print { display: none; }
-            .page-break { page-break-after: always; }
-            body { background-color: white; }
-        }
+        /* 基礎網頁樣式 */
         .report-card {
             width: 210mm;
             min-height: 297mm;
             padding: 20mm;
-            margin: auto;
+            margin: 20px auto;
             background: white;
             box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            box-sizing: border-box;
         }
+
+        /* 列印專用樣式修正 */
         @media print {
+            @page {
+                size: A4;
+                margin: 0;
+            }
+            body {
+                background-color: white;
+                margin: 0;
+                padding: 0;
+            }
+            .no-print { display: none; }
             .report-card {
                 box-shadow: none;
                 margin: 0;
-                width: 100%;
+                width: 210mm;
+                height: 297mm;
+                break-after: page; /* 強制換頁，不留殘餘空白 */
+                page-break-after: always; /* 舊版瀏覽器相容 */
+            }
+            /* 移除最後一頁後的空白頁 */
+            .report-card:last-child {
+                break-after: auto;
+                page-break-after: auto;
             }
         }
     </style>
@@ -57,13 +74,11 @@
                 const parts = trimmedLine.split(/\t|\s{2,}/);
                 if (parts.length >= 6) {
                     const classId = parts[1];
-                    // 強制提取數字並轉為整數，確保排序正確
                     const seatNo = parseInt(parts[2].replace(/\D/g, ''), 10);
                     const name = parts[3];
                     const testName = parts[4].trim();
                     const score = parseInt(parts[5].replace('%', ''), 10);
 
-                    // 使用 班級-座號(補零)-姓名 作為唯一 Key 方便除錯
                     const key = `${classId}-${String(seatNo).padStart(3, '0')}-${name}`;
                     if (!students[key]) {
                         students[key] = {
@@ -81,16 +96,12 @@
                 }
             });
 
-            // --- 強化後的座號排序邏輯 ---
             const sortedKeys = Object.keys(students).sort((a, b) => {
                 const s1 = students[a];
                 const s2 = students[b];
-                
-                // 1. 先比班級 (字串)
                 if (s1.classId !== s2.classId) {
                     return s1.classId.localeCompare(s2.classId);
                 }
-                // 2. 班級相同則比座號 (數值)
                 return s1.seatNo - s2.seatNo;
             });
 
@@ -125,11 +136,11 @@
                     sumScores += thisScore;
 
                     tableRows += `
-                        <tr class="border-b text-sm">
-                            <td class="py-2 px-3 text-left border border-gray-300">${tname}</td>
-                            <td class="py-2 px-3 border border-gray-300">${calcMethod}</td>
-                            <td class="py-2 px-3 font-semibold border border-gray-300">${thisScore.toFixed(1)}</td>
-                            <td class="py-2 px-3 border border-gray-300">${scores.length}次</td>
+                        <tr class="text-sm">
+                            <td class="py-1.5 px-3 text-left border border-gray-400">${tname}</td>
+                            <td class="py-1.5 px-3 border border-gray-400 text-center">${calcMethod}</td>
+                            <td class="py-1.5 px-3 font-semibold border border-gray-400 text-center">${thisScore.toFixed(1)}</td>
+                            <td class="py-1.5 px-3 border border-gray-400 text-center">${scores.length}次</td>
                         </tr>
                     `;
                 });
@@ -143,16 +154,16 @@
                 }
 
                 const cardHtml = `
-                    <div class="report-card page-break mb-8">
-                        <h1 class="text-3xl font-bold text-center mb-8">114寒假閱讀測驗學習成果報告</h1>
+                    <div class="report-card">
+                        <h1 class="text-3xl font-bold text-center mb-6">114寒假閱讀測驗學習成果報告</h1>
                         
-                        <div class="flex justify-between border-b-2 border-black pb-2 mb-6 font-bold text-lg">
+                        <div class="flex justify-between border-b-2 border-black pb-1 mb-4 font-bold text-lg">
                             <span>班級：${s.classId}</span>
                             <span>座號：${String(s.seatNo).padStart(2, '0')}</span>
                             <span>姓名：${s.name}</span>
                         </div>
 
-                        <table class="w-full border-collapse border border-gray-400 mb-8">
+                        <table class="w-full border-collapse border-2 border-gray-800 mb-6">
                             <thead>
                                 <tr class="bg-gray-100 text-sm">
                                     <th class="border border-gray-400 py-2 px-3 text-left">測驗/項目名稱</th>
@@ -166,29 +177,29 @@
                             </tbody>
                         </table>
 
-                        <div class="flex justify-between items-start">
-                            <div class="space-y-2">
+                        <div class="flex justify-between items-start mb-6">
+                            <div class="space-y-1">
                                 <h3 class="font-bold text-lg">【成績計算說明】</h3>
                                 <ul class="text-sm space-y-1">
-                                    <li>• 總得分 (含停機項累計)：<span class="font-mono">${sumScores.toFixed(1)}</span></li>
+                                    <li>• 各項目總得分：<span class="font-mono">${sumScores.toFixed(1)}</span></li>
                                     <li>• 初始平均 (總分/10)：<span class="font-mono">${initialAvg.toFixed(2)}</span></li>
                                     ${reductionCount > 0 ? `<li class="text-red-600 font-bold">• 超額處理：經 ${reductionCount} 次折半校正至 100 以下</li>` : `<li>• 最終校正分數：${finalScore.toFixed(1)}</li>`}
                                 </ul>
                             </div>
 
-                            <div class="border-2 border-red-600 p-4 text-center w-40">
+                            <div class="border-4 border-red-600 p-3 text-center w-40">
                                 <div class="text-red-600 font-bold text-sm mb-1">最終成績</div>
                                 <div class="text-4xl font-bold text-red-600">${finalScore.toFixed(1)}</div>
                             </div>
                         </div>
 
-                        <div class="mt-20 flex gap-8">
+                        <div class="mt-auto pt-10 flex gap-8">
                             <div class="flex-1">
-                                <div class="font-bold mb-2">教師評語：</div>
-                                <div class="border border-black h-24 w-full p-2"></div>
+                                <div class="font-bold mb-1">教師評語：</div>
+                                <div class="border-2 border-black h-24 w-full p-2"></div>
                             </div>
-                            <div class="flex-1 flex flex-col justify-end pb-2">
-                                <div class="font-bold">家長簽名：________________</div>
+                            <div class="flex-1 flex flex-col justify-end pb-1">
+                                <div class="font-bold text-right">家長簽名：________________</div>
                             </div>
                         </div>
                     </div>
