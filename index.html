@@ -6,7 +6,6 @@
     <title>114寒假閱讀測驗成績產生器</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        /* 基礎網頁樣式 */
         .report-card {
             width: 210mm;
             min-height: 297mm;
@@ -15,9 +14,10 @@
             background: white;
             box-shadow: 0 0 10px rgba(0,0,0,0.1);
             box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
         }
 
-        /* 列印專用樣式修正 */
         @media print {
             @page {
                 size: A4;
@@ -34,10 +34,9 @@
                 margin: 0;
                 width: 210mm;
                 height: 297mm;
-                break-after: page; /* 強制換頁，不留殘餘空白 */
-                page-break-after: always; /* 舊版瀏覽器相容 */
+                break-after: page;
+                page-break-after: always;
             }
-            /* 移除最後一頁後的空白頁 */
             .report-card:last-child {
                 break-after: auto;
                 page-break-after: auto;
@@ -49,17 +48,64 @@
 
     <div class="no-print p-6 max-w-4xl mx-auto">
         <h1 class="text-2xl font-bold mb-4 text-blue-800">114寒假閱讀測驗成績產生器</h1>
+        
         <div class="bg-white p-4 rounded-lg shadow-md mb-6">
-            <label class="block mb-2 font-semibold">請貼入原始資料 (格式：時間 班級 座號 姓名 卷名 分數)：</label>
-            <textarea id="rawData" class="w-full h-48 p-2 border rounded font-mono text-sm" placeholder="2026/02/22 10:00	801	05	王小明	系統停機	100%"></textarea>
-            <button onclick="processData()" class="mt-4 bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded font-bold transition">產生個人成績單</button>
-            <button onclick="window.print()" id="printBtn" class="mt-4 ml-2 bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded font-bold transition hidden">直接列印 (PDF)</button>
+            <div class="mb-4">
+                <label class="block mb-2 font-semibold">方法 A：貼上 Google 試算表「發佈為 CSV」的連結</label>
+                <div class="flex gap-2">
+                    <input type="text" id="sheetUrl" class="flex-1 p-2 border rounded" placeholder="https://docs.google.com/spreadsheets/d/.../pub?output=csv">
+                    <button onclick="fetchFromUrl()" id="fetchBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded font-bold transition">讀取連結</button>
+                </div>
+                <p class="text-xs text-gray-500 mt-1">※ 操作方式：電腦板網頁 > 檔案 > 共用 > 發佈到網路 > 選擇「逗號分隔值 (.csv)」</p>
+            </div>
+
+            <hr class="my-4">
+
+            <label class="block mb-2 font-semibold">方法 B：直接貼上原始資料 (文字)</label>
+            <textarea id="rawData" class="w-full h-32 p-2 border rounded font-mono text-sm" placeholder="時間	班級	座號	姓名	卷名	分數"></textarea>
+            
+            <div class="mt-4 flex gap-2">
+                <button onclick="processData()" class="bg-gray-700 hover:bg-gray-800 text-white px-6 py-2 rounded font-bold transition">手動產生</button>
+                <button onclick="window.print()" id="printBtn" class="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded font-bold transition hidden">直接列印 (PDF)</button>
+            </div>
         </div>
+        <div id="statusMsg" class="text-sm font-bold text-red-600 mb-4"></div>
     </div>
 
     <div id="outputContainer"></div>
 
     <script>
+        async function fetchFromUrl() {
+            const url = document.getElementById('sheetUrl').value.trim();
+            const statusMsg = document.getElementById('statusMsg');
+            const fetchBtn = document.getElementById('fetchBtn');
+
+            if (!url) {
+                statusMsg.innerText = "請輸入連結";
+                return;
+            }
+
+            try {
+                statusMsg.innerText = "讀取中...";
+                fetchBtn.disabled = true;
+                
+                const response = await fetch(url);
+                if (!response.ok) throw new Error("讀取失敗，請確認連結是否正確且已發佈");
+                
+                const csvData = await response.text();
+                // CSV 通常用逗號分隔，我們將其轉回程式支援的格式
+                document.getElementById('rawData').value = csvData.replace(/,/g, '\t');
+                processData();
+                statusMsg.innerText = "讀取成功！已自動產生。";
+                statusMsg.className = "text-sm font-bold text-green-600 mb-4";
+            } catch (err) {
+                statusMsg.innerText = "錯誤：" + err.message;
+                statusMsg.className = "text-sm font-bold text-red-600 mb-4";
+            } finally {
+                fetchBtn.disabled = false;
+            }
+        }
+
         function processData() {
             const rawText = document.getElementById('rawData').value.trim();
             if (!rawText) return;
@@ -69,24 +115,23 @@
 
             lines.forEach(line => {
                 const trimmedLine = line.trim();
+                // 排除標題列或空行
                 if (!trimmedLine || trimmedLine.includes("時間") || trimmedLine.includes("班級")) return;
                 
-                const parts = trimmedLine.split(/\t|\s{2,}/);
+                // 支援 CSV 逗號、Tab 或多空格
+                const parts = trimmedLine.split(/,|\t|\s{2,}/);
                 if (parts.length >= 6) {
-                    const classId = parts[1];
+                    const classId = parts[1].replace(/"/g, ''); // 移除 CSV 可能帶有的引號
                     const seatNo = parseInt(parts[2].replace(/\D/g, ''), 10);
-                    const name = parts[3];
-                    const testName = parts[4].trim();
-                    const score = parseInt(parts[5].replace('%', ''), 10);
+                    const name = parts[3].replace(/"/g, '');
+                    const testName = parts[4].replace(/"/g, '').trim();
+                    const score = parseInt(parts[5].replace(/[%\s"]/g, ''), 10);
+
+                    if (isNaN(seatNo) || isNaN(score)) return;
 
                     const key = `${classId}-${String(seatNo).padStart(3, '0')}-${name}`;
                     if (!students[key]) {
-                        students[key] = {
-                            classId, 
-                            seatNo, 
-                            name,
-                            tests: {}
-                        };
+                        students[key] = { classId, seatNo, name, tests: {} };
                     }
 
                     if (!students[key].tests[testName]) {
@@ -99,9 +144,7 @@
             const sortedKeys = Object.keys(students).sort((a, b) => {
                 const s1 = students[a];
                 const s2 = students[b];
-                if (s1.classId !== s2.classId) {
-                    return s1.classId.localeCompare(s2.classId);
-                }
+                if (s1.classId !== s2.classId) return s1.classId.localeCompare(s2.classId);
                 return s1.seatNo - s2.seatNo;
             });
 
@@ -117,7 +160,6 @@
                 const s = students[key];
                 let sumScores = 0;
                 let tableRows = '';
-
                 const testNames = Object.keys(s.tests).sort();
 
                 testNames.forEach(tname => {
@@ -193,9 +235,9 @@
                             </div>
                         </div>
 
-                        <div class="mt-auto pt-10 flex gap-8">
+                        <div class="mt-auto flex gap-8">
                             <div class="flex-1">
-                                <div class="font-bold mb-1">教師評語：</div>
+                                <div class="font-bold mb-1 text-sm">教師評語：</div>
                                 <div class="border-2 border-black h-24 w-full p-2"></div>
                             </div>
                             <div class="flex-1 flex flex-col justify-end pb-1">
@@ -210,3 +252,4 @@
     </script>
 </body>
 </html>
+
