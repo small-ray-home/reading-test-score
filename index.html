@@ -42,6 +42,15 @@
                 page-break-after: auto;
             }
         }
+
+        .filter-chip {
+            transition: all 0.2s;
+        }
+        .filter-chip input:checked + span {
+            background-color: #2563eb;
+            color: white;
+            border-color: #2563eb;
+        }
     </style>
 </head>
 <body class="bg-gray-100 font-sans">
@@ -51,30 +60,45 @@
         
         <div class="bg-white p-4 rounded-lg shadow-md mb-6">
             <div class="mb-4">
-                <label class="block mb-2 font-semibold">方法 A：貼上 Google 試算表「發佈為 CSV」的連結</label>
+                <label class="block mb-2 font-semibold text-gray-700">方法 A：從 Google 試算表讀取 (發佈為 CSV)</label>
                 <div class="flex gap-2">
                     <input type="text" id="sheetUrl" class="flex-1 p-2 border rounded" placeholder="https://docs.google.com/spreadsheets/d/.../pub?output=csv">
                     <button onclick="fetchFromUrl()" id="fetchBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded font-bold transition">讀取連結</button>
                 </div>
-                <p class="text-xs text-gray-500 mt-1">※ 操作方式：電腦板網頁 > 檔案 > 共用 > 發佈到網路 > 選擇「逗號分隔值 (.csv)」</p>
             </div>
 
             <hr class="my-4">
 
-            <label class="block mb-2 font-semibold">方法 B：直接貼上原始資料 (文字)</label>
-            <textarea id="rawData" class="w-full h-32 p-2 border rounded font-mono text-sm" placeholder="時間	班級	座號	姓名	卷名	分數"></textarea>
+            <label class="block mb-2 font-semibold text-gray-700">方法 B：貼上原始資料</label>
+            <textarea id="rawData" class="w-full h-32 p-2 border rounded font-mono text-sm" placeholder="時間	班級	座號	姓名	卷名	分數" oninput="updateFilters()"></textarea>
             
+            <!-- 測驗項目篩選區 -->
+            <div id="filterSection" class="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-100 hidden">
+                <div class="flex justify-between items-center mb-2">
+                    <span class="font-bold text-blue-800">請勾選要包含的測驗項目：</span>
+                    <div class="space-x-2">
+                        <button onclick="selectAllFilters(true)" class="text-xs text-blue-600 underline">全選</button>
+                        <button onclick="selectAllFilters(false)" class="text-xs text-blue-600 underline">全不選</button>
+                    </div>
+                </div>
+                <div id="filterContainer" class="flex flex-wrap gap-2">
+                    <!-- 自動產生核取方塊 -->
+                </div>
+            </div>
+
             <div class="mt-4 flex gap-2">
-                <button onclick="processData()" class="bg-gray-700 hover:bg-gray-800 text-white px-6 py-2 rounded font-bold transition">手動產生</button>
+                <button onclick="processData()" class="bg-gray-800 hover:bg-black text-white px-6 py-2 rounded font-bold transition">產生個人成績單</button>
                 <button onclick="window.print()" id="printBtn" class="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded font-bold transition hidden">直接列印 (PDF)</button>
             </div>
         </div>
-        <div id="statusMsg" class="text-sm font-bold text-red-600 mb-4"></div>
+        <div id="statusMsg" class="text-sm font-bold mb-4"></div>
     </div>
 
     <div id="outputContainer"></div>
 
     <script>
+        let allStudentsData = []; // 暫存解析後的完整資料
+
         async function fetchFromUrl() {
             const url = document.getElementById('sheetUrl').value.trim();
             const statusMsg = document.getElementById('statusMsg');
@@ -82,6 +106,7 @@
 
             if (!url) {
                 statusMsg.innerText = "請輸入連結";
+                statusMsg.className = "text-sm font-bold text-red-600 mb-4";
                 return;
             }
 
@@ -93,10 +118,9 @@
                 if (!response.ok) throw new Error("讀取失敗，請確認連結是否正確且已發佈");
                 
                 const csvData = await response.text();
-                // CSV 通常用逗號分隔，我們將其轉回程式支援的格式
                 document.getElementById('rawData').value = csvData.replace(/,/g, '\t');
-                processData();
-                statusMsg.innerText = "讀取成功！已自動產生。";
+                updateFilters(); // 更新篩選清單
+                statusMsg.innerText = "資料讀取成功，請勾選測驗項目後按下「產生個人成績單」。";
                 statusMsg.className = "text-sm font-bold text-green-600 mb-4";
             } catch (err) {
                 statusMsg.innerText = "錯誤：" + err.message;
@@ -106,27 +130,72 @@
             }
         }
 
+        // 自動掃描資料中的測驗名稱並產生篩選器
+        function updateFilters() {
+            const rawText = document.getElementById('rawData').value.trim();
+            const filterSection = document.getElementById('filterSection');
+            const filterContainer = document.getElementById('filterContainer');
+            
+            if (!rawText) {
+                filterSection.classList.add('hidden');
+                return;
+            }
+
+            const lines = rawText.split('\n');
+            const testSet = new Set();
+
+            lines.forEach(line => {
+                const parts = line.trim().split(/,|\t|\s{2,}/);
+                if (parts.length >= 6 && !line.includes("時間")) {
+                    testSet.add(parts[4].replace(/"/g, '').trim());
+                }
+            });
+
+            if (testSet.size > 0) {
+                filterSection.classList.remove('hidden');
+                filterContainer.innerHTML = '';
+                Array.from(testSet).sort().forEach(testName => {
+                    filterContainer.innerHTML += `
+                        <label class="filter-chip cursor-pointer">
+                            <input type="checkbox" class="hidden test-filter-checkbox" value="${testName}" checked onchange="processData()">
+                            <span class="px-3 py-1 border rounded-full text-sm font-medium border-gray-300 bg-white block hover:border-blue-400">
+                                ${testName}
+                            </span>
+                        </label>
+                    `;
+                });
+            }
+        }
+
+        function selectAllFilters(check) {
+            document.querySelectorAll('.test-filter-checkbox').forEach(cb => cb.checked = check);
+            processData();
+        }
+
         function processData() {
             const rawText = document.getElementById('rawData').value.trim();
             if (!rawText) return;
 
+            // 獲取目前勾選的測驗項目
+            const selectedTests = Array.from(document.querySelectorAll('.test-filter-checkbox:checked')).map(cb => cb.value);
+            
             const lines = rawText.split('\n');
             const students = {};
 
             lines.forEach(line => {
                 const trimmedLine = line.trim();
-                // 排除標題列或空行
                 if (!trimmedLine || trimmedLine.includes("時間") || trimmedLine.includes("班級")) return;
                 
-                // 支援 CSV 逗號、Tab 或多空格
                 const parts = trimmedLine.split(/,|\t|\s{2,}/);
                 if (parts.length >= 6) {
-                    const classId = parts[1].replace(/"/g, ''); // 移除 CSV 可能帶有的引號
+                    const classId = parts[1].replace(/"/g, '');
                     const seatNo = parseInt(parts[2].replace(/\D/g, ''), 10);
                     const name = parts[3].replace(/"/g, '');
                     const testName = parts[4].replace(/"/g, '').trim();
                     const score = parseInt(parts[5].replace(/[%\s"]/g, ''), 10);
 
+                    // 檢查是否在勾選清單中
+                    if (!selectedTests.includes(testName)) return;
                     if (isNaN(seatNo) || isNaN(score)) return;
 
                     const key = `${classId}-${String(seatNo).padStart(3, '0')}-${name}`;
@@ -149,12 +218,17 @@
             });
 
             renderReports(students, sortedKeys);
-            document.getElementById('printBtn').classList.remove('hidden');
+            document.getElementById('printBtn').classList.toggle('hidden', sortedKeys.length === 0);
         }
 
         function renderReports(students, keys) {
             const container = document.getElementById('outputContainer');
             container.innerHTML = '';
+
+            if (keys.length === 0) {
+                container.innerHTML = '<div class="text-center p-10 text-gray-500">尚無符合篩選條件的資料</div>';
+                return;
+            }
 
             keys.forEach(key => {
                 const s = students[key];
@@ -252,4 +326,3 @@
     </script>
 </body>
 </html>
-
