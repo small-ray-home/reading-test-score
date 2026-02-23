@@ -297,7 +297,7 @@
                             <div class="space-y-1">
                                 <h3 class="font-bold text-lg">【成績計算說明】</h3>
                                 <ul class="text-sm space-y-1">
-                                    <li>• 各項目總得分：<span class="font-mono">${sumScores.toFixed(1)}</span></li>
+                                    <li>• 總得分 (僅包含勾選項)：<span class="font-mono">${sumScores.toFixed(1)}</span></li>
                                     <li>• 初始平均 (總分/10)：<span class="font-mono">${initialAvg.toFixed(2)}</span></li>
                                     ${reductionCount > 0 ? `<li class="text-red-600 font-bold">• 超額處理：經 ${reductionCount} 次折半校正至 100 以下</li>` : `<li>• 最終校正分數：${finalScore.toFixed(1)}</li>`}
                                 </ul>
