@@ -43,9 +43,6 @@
             }
         }
 
-        .filter-chip {
-            transition: all 0.2s;
-        }
         .filter-chip input:checked + span {
             background-color: #2563eb;
             color: white;
@@ -72,18 +69,24 @@
             <label class="block mb-2 font-semibold text-gray-700">方法 B：貼上原始資料</label>
             <textarea id="rawData" class="w-full h-32 p-2 border rounded font-mono text-sm" placeholder="時間	班級	座號	姓名	卷名	分數" oninput="updateFilters()"></textarea>
             
-            <!-- 測驗項目篩選區 -->
+            <!-- 補考處理與篩選區 -->
             <div id="filterSection" class="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-100 hidden">
+                <div class="mb-4 p-3 bg-white rounded border border-blue-200">
+                    <label class="flex items-center cursor-pointer">
+                        <input type="checkbox" id="overwriteRetest" class="w-4 h-4 text-blue-600" onchange="processData()" checked>
+                        <span class="ml-2 font-bold text-gray-700">補考成績處理：若有補考，自動覆蓋原始成績 (需卷名開頭相同)</span>
+                    </label>
+                    <p class="text-xs text-gray-500 mt-1 ml-6">※ 註：補考項需命名為「原卷名 補考」（包含空格）。勾選後，原卷成績將不計入。</p>
+                </div>
+
                 <div class="flex justify-between items-center mb-2">
-                    <span class="font-bold text-blue-800">請勾選要包含的測驗項目：</span>
+                    <span class="font-bold text-blue-800">請勾選要顯示的測驗項目：</span>
                     <div class="space-x-2">
                         <button onclick="selectAllFilters(true)" class="text-xs text-blue-600 underline">全選</button>
                         <button onclick="selectAllFilters(false)" class="text-xs text-blue-600 underline">全不選</button>
                     </div>
                 </div>
-                <div id="filterContainer" class="flex flex-wrap gap-2">
-                    <!-- 自動產生核取方塊 -->
-                </div>
+                <div id="filterContainer" class="flex flex-wrap gap-2"></div>
             </div>
 
             <div class="mt-4 flex gap-2">
@@ -97,8 +100,6 @@
     <div id="outputContainer"></div>
 
     <script>
-        let allStudentsData = []; // 暫存解析後的完整資料
-
         async function fetchFromUrl() {
             const url = document.getElementById('sheetUrl').value.trim();
             const statusMsg = document.getElementById('statusMsg');
@@ -113,14 +114,12 @@
             try {
                 statusMsg.innerText = "讀取中...";
                 fetchBtn.disabled = true;
-                
                 const response = await fetch(url);
-                if (!response.ok) throw new Error("讀取失敗，請確認連結是否正確且已發佈");
-                
+                if (!response.ok) throw new Error("讀取失敗，請確認連結");
                 const csvData = await response.text();
                 document.getElementById('rawData').value = csvData.replace(/,/g, '\t');
-                updateFilters(); // 更新篩選清單
-                statusMsg.innerText = "資料讀取成功，請勾選測驗項目後按下「產生個人成績單」。";
+                updateFilters();
+                statusMsg.innerText = "資料讀取成功。";
                 statusMsg.className = "text-sm font-bold text-green-600 mb-4";
             } catch (err) {
                 statusMsg.innerText = "錯誤：" + err.message;
@@ -130,20 +129,14 @@
             }
         }
 
-        // 自動掃描資料中的測驗名稱並產生篩選器
         function updateFilters() {
             const rawText = document.getElementById('rawData').value.trim();
             const filterSection = document.getElementById('filterSection');
             const filterContainer = document.getElementById('filterContainer');
-            
-            if (!rawText) {
-                filterSection.classList.add('hidden');
-                return;
-            }
+            if (!rawText) { filterSection.classList.add('hidden'); return; }
 
             const lines = rawText.split('\n');
             const testSet = new Set();
-
             lines.forEach(line => {
                 const parts = line.trim().split(/,|\t|\s{2,}/);
                 if (parts.length >= 6 && !line.includes("時間")) {
@@ -158,7 +151,7 @@
                     filterContainer.innerHTML += `
                         <label class="filter-chip cursor-pointer">
                             <input type="checkbox" class="hidden test-filter-checkbox" value="${testName}" checked onchange="processData()">
-                            <span class="px-3 py-1 border rounded-full text-sm font-medium border-gray-300 bg-white block hover:border-blue-400">
+                            <span class="px-3 py-1 border rounded-full text-sm border-gray-300 bg-white block hover:border-blue-400">
                                 ${testName}
                             </span>
                         </label>
@@ -176,16 +169,16 @@
             const rawText = document.getElementById('rawData').value.trim();
             if (!rawText) return;
 
-            // 獲取目前勾選的測驗項目
             const selectedTests = Array.from(document.querySelectorAll('.test-filter-checkbox:checked')).map(cb => cb.value);
+            const isOverwrite = document.getElementById('overwriteRetest').checked;
             
             const lines = rawText.split('\n');
             const students = {};
 
+            // 第一次遍歷：收集所有資料
             lines.forEach(line => {
                 const trimmedLine = line.trim();
                 if (!trimmedLine || trimmedLine.includes("時間") || trimmedLine.includes("班級")) return;
-                
                 const parts = trimmedLine.split(/,|\t|\s{2,}/);
                 if (parts.length >= 6) {
                     const classId = parts[1].replace(/"/g, '');
@@ -194,21 +187,30 @@
                     const testName = parts[4].replace(/"/g, '').trim();
                     const score = parseInt(parts[5].replace(/[%\s"]/g, ''), 10);
 
-                    // 檢查是否在勾選清單中
                     if (!selectedTests.includes(testName)) return;
-                    if (isNaN(seatNo) || isNaN(score)) return;
 
                     const key = `${classId}-${String(seatNo).padStart(3, '0')}-${name}`;
-                    if (!students[key]) {
-                        students[key] = { classId, seatNo, name, tests: {} };
-                    }
-
-                    if (!students[key].tests[testName]) {
-                        students[key].tests[testName] = [];
-                    }
+                    if (!students[key]) students[key] = { classId, seatNo, name, tests: {} };
+                    if (!students[key].tests[testName]) students[key].tests[testName] = [];
                     students[key].tests[testName].push(score);
                 }
             });
+
+            // 處理補考覆蓋邏輯
+            if (isOverwrite) {
+                Object.values(students).forEach(s => {
+                    const testNames = Object.keys(s.tests);
+                    testNames.forEach(tName => {
+                        if (tName.endsWith(" 補考")) {
+                            const originalName = tName.replace(" 補考", "");
+                            if (s.tests[originalName]) {
+                                // 刪除原始成績，僅保留補考
+                                delete s.tests[originalName];
+                            }
+                        }
+                    });
+                });
+            }
 
             const sortedKeys = Object.keys(students).sort((a, b) => {
                 const s1 = students[a];
@@ -224,9 +226,8 @@
         function renderReports(students, keys) {
             const container = document.getElementById('outputContainer');
             container.innerHTML = '';
-
             if (keys.length === 0) {
-                container.innerHTML = '<div class="text-center p-10 text-gray-500">尚無符合篩選條件的資料</div>';
+                container.innerHTML = '<div class="text-center p-10 text-gray-500">尚無符合條件的資料</div>';
                 return;
             }
 
@@ -248,7 +249,6 @@
                         calcMethod = "取平均值";
                         thisScore = scores.reduce((a, b) => a + b, 0) / scores.length;
                     }
-
                     sumScores += thisScore;
 
                     tableRows += `
@@ -272,13 +272,11 @@
                 const cardHtml = `
                     <div class="report-card">
                         <h1 class="text-3xl font-bold text-center mb-6">114寒假閱讀測驗學習成果報告</h1>
-                        
                         <div class="flex justify-between border-b-2 border-black pb-1 mb-4 font-bold text-lg">
                             <span>班級：${s.classId}</span>
                             <span>座號：${String(s.seatNo).padStart(2, '0')}</span>
                             <span>姓名：${s.name}</span>
                         </div>
-
                         <table class="w-full border-collapse border-2 border-gray-800 mb-6">
                             <thead>
                                 <tr class="bg-gray-100 text-sm">
@@ -288,11 +286,8 @@
                                     <th class="border border-gray-400 py-2 px-3">次數</th>
                                 </tr>
                             </thead>
-                            <tbody>
-                                ${tableRows}
-                            </tbody>
+                            <tbody>${tableRows}</tbody>
                         </table>
-
                         <div class="flex justify-between items-start mb-6">
                             <div class="space-y-1">
                                 <h3 class="font-bold text-lg">【成績計算說明】</h3>
@@ -302,13 +297,11 @@
                                     ${reductionCount > 0 ? `<li class="text-red-600 font-bold">• 超額處理：經 ${reductionCount} 次折半校正至 100 以下</li>` : `<li>• 最終校正分數：${finalScore.toFixed(1)}</li>`}
                                 </ul>
                             </div>
-
                             <div class="border-4 border-red-600 p-3 text-center w-40">
                                 <div class="text-red-600 font-bold text-sm mb-1">最終成績</div>
                                 <div class="text-4xl font-bold text-red-600">${finalScore.toFixed(1)}</div>
                             </div>
                         </div>
-
                         <div class="mt-auto flex gap-8">
                             <div class="flex-1">
                                 <div class="font-bold mb-1 text-sm">教師評語：</div>
