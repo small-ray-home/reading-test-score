@@ -66,8 +66,8 @@
 
             <hr class="my-4">
 
-            <label class="block mb-2 font-semibold text-gray-700">方法 B：貼上原始資料</label>
-            <textarea id="rawData" class="w-full h-32 p-2 border rounded font-mono text-sm" placeholder="時間	班級	座號	姓名	卷名	分數" oninput="updateFilters()"></textarea>
+            <label class="block mb-2 font-semibold text-gray-700">方法 B：貼上原始資料 (新格式：時間/班級/座號/姓名/科目/卷名/答對/總題/得分)</label>
+            <textarea id="rawData" class="w-full h-48 p-2 border rounded font-mono text-sm" placeholder="時間	班級	座號	姓名	科目	卷名	答對題數	總題數	最終得分" oninput="updateFilters()"></textarea>
             
             <!-- 補考處理與篩選區 -->
             <div id="filterSection" class="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-100 hidden">
@@ -153,9 +153,15 @@
             const lines = rawText.split('\n');
             const testSet = new Set();
             lines.forEach(line => {
-                const parts = line.trim().split(/,|\t|\s{2,}/);
-                if (parts.length >= 6 && !line.includes("時間")) {
-                    testSet.add(parts[4].replace(/"/g, '').trim());
+                const trimmed = line.trim();
+                if (!trimmed) return;
+                const parts = trimmed.split(/\ +|\t|,/);
+                // 檢查新格式是否至少有包含卷名欄位（索引值 5）
+                if (parts.length >= 6 && !parts[0].includes("時間")) {
+                    const testName = parts[5].replace(/"/g, '').trim();
+                    if (testName) {
+                        testSet.add(testName);
+                    }
                 }
             });
 
@@ -194,20 +200,37 @@
             lines.forEach(line => {
                 const trimmedLine = line.trim();
                 if (!trimmedLine || trimmedLine.includes("時間") || trimmedLine.includes("班級")) return;
-                const parts = trimmedLine.split(/,|\t|\s{2,}/);
-                if (parts.length >= 6) {
-                    const classId = parts[1].replace(/"/g, '');
-                    const seatNo = parseInt(parts[2].replace(/\D/g, ''), 10);
-                    const name = parts[3].replace(/"/g, '');
-                    const testName = parts[4].replace(/"/g, '').trim();
-                    const score = parseInt(parts[5].replace(/[%\s"]/g, ''), 10);
+                
+                // 支援空格、多重空格、Tab或逗號分隔
+                const parts = trimmedLine.split(/\ +|\t|,/);
+                if (parts.length >= 9) {
+                    const classId = parts[1].replace(/"/g, '').trim();
+                    const seatNoRaw = parts[2].replace(/\D/g, '');
+                    const seatNo = seatNoRaw ? parseInt(seatNoRaw, 10) : 0;
+                    const name = parts[3].replace(/"/g, '').trim();
+                    const subject = parts[4].replace(/"/g, '').trim();
+                    const testName = parts[5].replace(/"/g, '').trim();
+                    const correctCount = parseInt(parts[6].replace(/"/g, ''), 10);
+                    const totalCount = parseInt(parts[7].replace(/"/g, ''), 10);
+                    const score = parseFloat(parts[8].replace(/[%\s"]/g, ''), 10);
 
                     if (!selectedTests.includes(testName)) return;
 
                     const key = `${classId}-${String(seatNo).padStart(3, '0')}-${name}`;
-                    if (!students[key]) students[key] = { classId, seatNo, name, tests: {} };
-                    if (!students[key].tests[testName]) students[key].tests[testName] = [];
-                    students[key].tests[testName].push(score);
+                    if (!students[key]) {
+                        students[key] = { classId, seatNo, name, tests: {} };
+                    }
+                    if (!students[key].tests[testName]) {
+                        students[key].tests[testName] = [];
+                    }
+                    
+                    // 將分析後的完整數據推入陣列中
+                    students[key].tests[testName].push({
+                        subject,
+                        correctCount,
+                        totalCount,
+                        score
+                    });
                 }
             });
 
@@ -247,34 +270,46 @@
                 let sumScores = 0;
                 let tableRows = '';
                 const testNames = Object.keys(s.tests).sort();
+                let validTestCount = 0;
 
                 testNames.forEach(tname => {
-                    const scores = s.tests[tname];
+                    const records = s.tests[tname];
                     let thisScore = 0;
                     let calcMethodDisplay = '';
+                    
+                    // 取出該科目名稱做顯示，預設取該測驗群組的第一筆記錄
+                    const subjectDisplay = records[0].subject || ''; 
 
                     if (tname.includes("系統停機")) {
                         calcMethodDisplay = "直接加總";
-                        thisScore = scores.reduce((a, b) => a + b, 0);
+                        thisScore = records.reduce((a, b) => a + b.score, 0);
                     } else if (calcMode === 'max') {
                         calcMethodDisplay = "取最高分";
-                        thisScore = Math.max(...scores);
+                        thisScore = Math.max(...records.map(r => r.score));
                     } else {
                         calcMethodDisplay = "取平均值";
-                        thisScore = scores.reduce((a, b) => a + b, 0) / scores.length;
+                        thisScore = records.reduce((a, b) => a + b.score, 0) / records.length;
                     }
                     sumScores += thisScore;
+                    validTestCount++;
+
+                    // 取得答對題數及總題數的加總顯示（或單次顯示）
+                    const totalCorrect = records.reduce((a, b) => a + b.correctCount, 0);
+                    const totalQuestions = records.reduce((a, b) => a + b.totalCount, 0);
+                    const countDisplay = records.length > 1 ? `${totalCorrect}/${totalQuestions} (${records.length}次)` : `${totalCorrect}/${totalQuestions}`;
 
                     tableRows += `
                         <tr class="text-sm">
+                            <td class="py-1.5 px-3 text-center border border-gray-400">${subjectDisplay}</td>
                             <td class="py-1.5 px-3 text-left border border-gray-400">${tname} ${tname.endsWith(" 補考") ? '<span class="text-xs bg-yellow-100 px-1 rounded">補考</span>' : ''}</td>
                             <td class="py-1.5 px-3 border border-gray-400 text-center">${calcMethodDisplay}</td>
                             <td class="py-1.5 px-3 font-semibold border border-gray-400 text-center">${thisScore.toFixed(1)}</td>
-                            <td class="py-1.5 px-3 border border-gray-400 text-center">${scores.length}次</td>
+                            <td class="py-1.5 px-3 border border-gray-400 text-center">${countDisplay}</td>
                         </tr>
                     `;
                 });
 
+                // 原有公式：初始平均為總分除以 10
                 const initialAvg = sumScores / 10;
                 let finalScore = initialAvg;
                 let reductionCount = 0;
@@ -294,10 +329,11 @@
                         <table class="w-full border-collapse border-2 border-gray-800 mb-6">
                             <thead>
                                 <tr class="bg-gray-100 text-sm">
+                                    <th class="border border-gray-400 py-2 px-3 w-16">科目</th>
                                     <th class="border border-gray-400 py-2 px-3 text-left">測驗/項目名稱</th>
-                                    <th class="border border-gray-400 py-2 px-3">計算方式</th>
-                                    <th class="border border-gray-400 py-2 px-3">本項得分</th>
-                                    <th class="border border-gray-400 py-2 px-3">次數</th>
+                                    <th class="border border-gray-400 py-2 px-3 w-24">計算方式</th>
+                                    <th class="border border-gray-400 py-2 px-3 w-24">本項得分</th>
+                                    <th class="border border-gray-400 py-2 px-3 w-28">答對/總題數</th>
                                 </tr>
                             </thead>
                             <tbody>${tableRows}</tbody>
@@ -306,7 +342,7 @@
                             <div class="space-y-1">
                                 <h3 class="font-bold text-lg">【成績計算說明】</h3>
                                 <ul class="text-sm space-y-1">
-                                    <li>• 總得分：<span class="font-mono">${sumScores.toFixed(1)}</span></li>
+                                    <li>• 項目總得分：<span class="font-mono">${sumScores.toFixed(1)}</span></li>
                                     <li>• 初始平均 (總分/10)：<span class="font-mono">${initialAvg.toFixed(2)}</span></li>
                                     ${reductionCount > 0 ? `<li class="text-red-600 font-bold">• 超額處理：經 ${reductionCount} 次折半校正至 100 以下</li>` : `<li>• 最終校正分數：${finalScore.toFixed(1)}</li>`}
                                 </ul>
